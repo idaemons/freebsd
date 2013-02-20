@@ -1,0 +1,196 @@
+#!/bin/sh
+
+main () {
+    init_vars
+
+    command="${1---help}"; shift
+
+    parse_args "$@"
+
+    case "$command" in
+        init)
+            do_init
+            ;;
+        fetch)
+            do_fetch
+            ;;
+        clean)
+            do_clean
+            ;;
+        update)
+            do_update
+            ;;
+        commit)
+            do_commit
+            ;;
+        push)
+            do_push
+            ;;
+        --help)
+            usage
+            ;;
+        *)
+            usage
+            exit 64
+            ;;
+    esac
+}
+
+usage () {
+    cat <<EOF
+usage:
+  $0 init [--repository=URL]
+    Runs git svn init and applies necessary settings.
+
+    options:
+      --repository=URL  Alternative repository URL to fetch from
+                        (e.g. svn://svn.freebsd.org/base)
+
+  $0 fetch
+    Runs git svn fetch.
+EOF
+}
+
+do_init () {
+    set -e
+
+    git config --add remote.origin.fetch "+refs/remotes/${prefix}*:refs/remotes/origin/svn/*"
+    git remote update origin
+
+    git remote add freebsd git://github.com/freebsd/freebsd.git
+    git show-ref | while read sha1 ref; do
+        case "$ref" in
+            refs/remotes/origin/svn/*)
+                git update-ref refs/remotes/${prefix}"${ref#refs/remotes/origin/svn/}" "$sha1"
+                ;;
+            refs/remotes/origin/freebsd/*)
+                git update-ref refs/remotes/freebsd/"${ref#refs/remotes/origin/freebsd/}" "$sha1"
+                ;;
+        esac
+    done
+
+    echo "Running \"git svn init $init_args\""
+    git svn init $init_args
+    git config --add svn-remote.svn.branches "stable/*:refs/remotes/${prefix}stable/*"
+    git config --add svn-remote.svn.branches "releng/*:refs/remotes/${prefix}releng/*"
+    git config --add svn-remote.svn.tags "release/*:refs/remotes/${prefix}tags/release/*"
+
+    echo "Extracting git-svn files"
+    xzcat svn.txz | tar -xf - -C .git
+
+    set +e
+
+    echo "You should now be ready to run \"$0 fetch\"."
+}
+
+init_vars () {
+    command=
+    init_args="-T head"
+    prefix=svn/
+    repository=svn+ssh://svn.freebsd.org/base
+}
+
+parse_args () {
+    while [ $# -ne 0 ]; do
+        case "$1" in
+            --prefix\=*)
+                prefix="${1#--*=}"
+                shift
+                ;;
+            --repository\=*)
+                init_args="$init_args --rewrite-root=$repository"
+                repository="${1#--*=}"
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    case "$command" in
+        init)
+            init_args="$init_args${prefix:+ --prefix="$prefix"} $@ $repository"
+            ;;
+        fetch)
+            fetch_args="$@"
+            ;;
+    esac
+}
+
+do_fetch () {
+    set -e
+
+    echo "Running \"git svn fetch $fetch_args\""
+    git svn fetch $fetch_args
+
+    set +e
+
+    echo "You should now be ready to run \"$0 clean\"."
+}
+
+do_clean () {
+    set -e
+
+    echo "Updating \"origin\" with the official mirror"
+    git remote remove origin
+    git remote rename freebsd origin
+
+    echo "Checking out master"
+    git checkout -b master origin/master
+
+    echo "Cleaning up myself"
+    git branch -D git-svn
+    git gc
+
+    set +e
+
+    echo "You should now be ready to hack."
+}
+
+do_update () {
+    git svn fetch
+    git remote update freebsd
+
+    git show-ref | while read sha1 ref; do
+        case "$ref" in
+            refs/remotes/freebsd/*)
+                git update-ref refs/heads/freebsd/"${ref#refs/remotes/freebsd/}" "$sha1"
+                ;;
+            refs/remotes/${prefix}*)
+                git update-ref refs/heads/svn/"${ref#refs/remotes/${prefix}}" "$sha1"
+                ;;
+        esac
+    done
+
+    git svn gc
+    tar -cf - -C .git svn | xz -c > svn.txz
+    git add svn.txz
+}
+
+do_commit () {
+    local rev message
+    set -- `git svn log --oneline --limit=1`
+    rev="$1"
+    message="Store git-svn files as of $rev."
+    set -- `git log --oneline --max-count=1`; shift
+    case "$*" in
+        'Store git-svn files as of r'[1-9]*.)
+            git commit --amend -m "$message" --date="$(date)"
+            ;;
+        *)
+            git commit -m "$message" --date="$(date)"
+            ;;
+    esac
+}
+
+do_push () {
+    git push --force origin git-svn
+    git push --all origin
+}
+
+main "$@"
