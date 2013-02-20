@@ -1,0 +1,161 @@
+#!/bin/sh
+
+main () {
+    case "${1---help}" in
+        init)
+            shift
+            do_init "$@"
+            ;;
+        fetch)
+            shift
+            do_fetch "$@"
+            ;;
+        clean)
+            shift
+            do_clean "$@"
+            ;;
+        maint)
+            shift
+            do_maint "$@"
+            ;;
+        --help)
+            usage
+            ;;
+        *)
+            usage
+            exit 64
+            ;;
+    esac
+}
+
+usage () {
+    cat <<EOF
+usage:
+  $0 init [--repository=URL]
+    Runs git svn init and applies necessary settings.
+
+    options:
+      --repository=URL  Alternative repository URL to fetch from
+                        (e.g. svn://svn.freebsd.org/base)
+
+  $0 fetch
+    Runs git svn fetch.
+EOF
+}
+
+do_init () {
+    init_vars
+    parse_args "$@"
+
+    set -e
+
+    git config --add remote.origin.fetch "+refs/remotes/${prefix}*:refs/remotes/origin/svn/*"
+    git remote update origin
+
+    git remote add freebsd git://github.com/freebsd/freebsd.git
+    git show-ref | while read sha1 ref; do
+        case "$ref" in
+            refs/remotes/origin/svn/*)
+                git update-ref refs/remotes/${prefix}"${ref#refs/remotes/origin/svn/}" "$sha1"
+                ;;
+            refs/remotes/origin/freebsd/*)
+                git update-ref refs/remotes/freebsd/"${ref#refs/remotes/origin/freebsd/}" "$sha1"
+                ;;
+        esac
+    done
+
+    echo "Running \"git svn init $init_args\""
+    git svn init $init_args
+    git config --add svn-remote.svn.branches "stable/*:refs/remotes/${prefix}stable/*"
+    git config --add svn-remote.svn.branches "releng/*:refs/remotes/${prefix}releng/*"
+    git config --add svn-remote.svn.tags "release/*:refs/remotes/${prefix}tags/release/*"
+
+    echo "Extracting git-svn files"
+    xzcat svn.txz | tar -xf - -C .git
+
+    set +e
+
+    echo "You should now be ready to run \"$0 fetch\"."
+}
+
+init_vars () {
+    init_args="-T head"
+    prefix=svn/
+    repository=svn+ssh://svn.freebsd.org/base
+}
+
+parse_args () {
+    while [ $# -ne 0 ]; do
+        case "$1" in
+            --prefix\=*)
+                prefix="${1#--*=}"
+                shift
+                ;;
+            --repository\=*)
+                init_args="$init_args --rewrite-root=$repository"
+                repository="${1#--*=}"
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    init_args="$init_args${prefix:+ --prefix="$prefix"} $@ $repository"
+}
+
+do_fetch () {
+    set -e
+
+    echo "Running \"git svn fetch $@\""
+    git svn fetch "$@"
+
+    set +e
+
+    echo "You should now be ready to run \"$0 clean\"."
+}
+
+do_clean () {
+    parse_args
+
+    set -e
+
+    echo "Updating \"origin\" with the official mirror"
+    git remote remove origin
+    git remote rename freebsd origin
+
+    echo "Checking out master"
+    git checkout -b master origin/master
+
+    echo "Cleaning up myself"
+    git branch -D git-svn
+    git gc
+
+    set +e
+
+    echo "You should now be ready to hack."
+}
+
+do_maint () {
+    git svn fetch
+    git remote update freebsd
+
+    git show-ref | while read sha1 ref; do
+        case "$ref" in
+            refs/remotes/freebsd/*)
+                git update-ref refs/heads/freebsd/"${ref#refs/remotes/freebsd/}" "$sha1"
+                ;;
+        esac
+    done
+
+    git svn gc
+    tar -cf - -C .git svn | xz -c > svn.txz
+    git add svn.txz
+}
+
+main "$@"
