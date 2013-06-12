@@ -33,12 +33,12 @@ Take the following steps to get a git-svn working directory:
 1. Clone this repository.  The git URL is preferred to https if you
    want to save time as much as possible.
 
-        $ git clone git://github.com/knu/freebsd.git
+        $ git clone git://github.com/idaemons/freebsd.git
 
    If you don't have outbound access to the git port (9418), use the
    https URL instead.
 
-        $ git clone https://github.com/knu/freebsd.git
+        $ git clone https://github.com/idaemons/freebsd.git
 
 2. Go into the working directory and make sure you are on the
    `git-svn` branch.
@@ -70,7 +70,7 @@ Take the following steps to get a git-svn working directory:
 
 5. Execute `./run clean`.  This completely erases the trace of this
    bootstrap branch and changes the `origin` URL from
-   [this fork](https://github.com/knu/freebsd) to
+   [this fork](https://github.com/idaemons/freebsd) to
    [the official mirror](https://github.com/freebsd/freebsd).
 
         $ ./run clean
@@ -97,5 +97,5 @@ Copyright (c) 2013 Akinori MUSHA.
 Licensed under the 2-clause BSD license.  See `LICENSE.txt` for
 details.
 
-Visit [GitHub Repository](https://github.com/knu/freebsd) for the
+Visit [GitHub Repository](https://github.com/idaemons/freebsd) for the
 latest information.
